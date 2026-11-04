@@ -15,4 +15,7 @@ const d = {
     soon: 'Soon', todayHint: "Today's workout shows here once you have a plan.", bodyHint: 'Weight, measures and photos arrive in step 6.' }
 }
 export const getLang = () => localStorage.getItem('lang') || (navigator.language.startsWith('en') ? 'en' : 'pt')
-export const t = k => d[getLang()][k] || k
+Object.assign(d.pt, { importPdf: 'Importar PDF(s)', reading: 'Lendo...', review: 'Revisar importação', programName: 'Nome do programa',
+  save: 'Salvar fichas', cancel: 'Cancelar', use: 'Usar', active: 'Ativa', del: 'Apagar', rest: 'Descanso', noActive: 'Escolha uma ficha na aba Fichas.',
+  week: 'Semana', noText: 'Sem texto selecionável (PDF digitalizado). O OCR chega na próxima parte.', last: 'Última', set: 'Série', load: 'Carga', reps: 'Reps', saved: 'Salvo' })
+export const t = k => d[getLang()][k] || d.pt[k] || k

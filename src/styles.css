@@ -18,3 +18,17 @@ nav button.on{color:var(--accent);box-shadow:inset 0 3px var(--accent)}
 .seg button.on{background:var(--accent);color:#000;font-weight:700}
 .btn{display:block;text-align:center;padding:14px;background:var(--panel);border:1px solid var(--line);color:var(--fg);font:inherit;font-weight:600}
 .btn:active{border-color:var(--accent)}
+input{background:var(--bg);border:1px solid var(--line);color:var(--fg);font:inherit;padding:10px;min-width:0;width:100%}
+.btn.pri{background:var(--accent);color:#000;border-color:var(--accent)}
+.card{background:var(--panel);border:1px solid var(--line);padding:12px;margin-bottom:12px}
+.card h3{margin:8px 0;font-size:18px;color:var(--accent)}
+summary{font-weight:700;font-size:19px}
+.row{display:grid;grid-template-columns:1fr 44px 1fr 1fr;gap:4px;margin-bottom:10px;border-bottom:1px solid var(--line);padding-bottom:8px}
+.row .w:nth-of-type(1){grid-column:1/4}.row .x{grid-column:4;background:none;border:1px solid var(--line);color:var(--dim)}
+.row input{font-size:14px;padding:6px}
+.chips{display:flex;gap:6px;margin-bottom:10px}.chips button{flex:1;padding:10px 0;background:var(--panel);border:1px solid var(--line);color:var(--fg);font:inherit}
+.chips .on,.wk .on{background:var(--accent);color:#000;font-weight:700}
+.wk{display:flex;gap:8px;align-items:center;margin:6px 0}.wk span{flex:1}.wk button{padding:8px 14px;background:var(--bg);border:1px solid var(--line);color:var(--fg);font:inherit}
+.hd{display:flex;justify-content:space-between;font-size:19px}.ex.fin{border-color:var(--accent)}.ex.bi{border-left:4px solid var(--accent)}
+.set{display:grid;grid-template-columns:24px 1fr 1fr 48px;gap:8px;align-items:center;margin-top:8px}
+.set button{padding:10px;background:var(--bg);border:1px solid var(--line);color:var(--dim);font:inherit}.set button.on{background:var(--accent);color:#000}
