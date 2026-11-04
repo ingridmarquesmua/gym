@@ -5,6 +5,7 @@ import { readDoc, parsePages, parseReps, parseRest } from './parser'
 
 const TABS = ['today', 'plans', 'body', 'settings']
 const DOW = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom']
+const dec = v => { const n = parseFloat(String(v ?? '').replace(',', '.')); return isNaN(n) ? null : n }
 const todayStr = () => new Date().toLocaleDateString('sv')
 const Empty = ({ title, hint }) => <div class="empty"><h2>{title}</h2><p>{hint}</p></div>
 
@@ -141,7 +142,7 @@ function Today() {
         {isOpen && Array.from({ length: it.sets }).map((_, i) => {
           const l = logs[it.id + '-' + i] || {}, pv = prev[it.id]?.[i], target = it.repScheme.perSet?.[i]
           return <div class="set"><span>{i + 1}</span>
-            <input type="number" inputmode="decimal" placeholder={pv ? `${pv.weightKg}` : 'kg'} value={l.weightKg ?? ''} onChange={e => save(it, i, { weightKg: e.target.value === '' ? null : +e.target.value })} />
+            <input type="text" inputmode="decimal" placeholder={pv ? `${pv.weightKg}` : 'kg'} value={l.weightKg ?? ''} onChange={e => save(it, i, { weightKg: dec(e.target.value) })} />
             <input type="number" inputmode="numeric" placeholder={target ? `${target}` : pv?.reps ? `${pv.reps}` : 'reps'} value={l.reps ?? ''} onChange={e => save(it, i, { reps: e.target.value === '' ? null : +e.target.value })} />
             <button class={l.done ? 'on' : ''} onClick={() => save(it, i, { done: !l.done, weightKg: l.weightKg ?? pv?.weightKg ?? null, reps: l.reps ?? target ?? pv?.reps ?? null })}>✓</button></div>
         })}
@@ -169,7 +170,7 @@ function Settings({ rerender }) {
 }
 
 
-const MET = { weight: 'Peso (kg)', cintura: 'Cintura (cm)', peito: 'Peito (cm)', braco: 'Braço (cm)', coxa: 'Coxa (cm)' }
+const MET = { weight: 'Peso (kg)', cintura: 'Cintura (cm)', abdomen: 'Abdômen (cm)', quadril: 'Quadril (cm)', peito: 'Peito (cm)', braco: 'Braço (cm)', coxa: 'Coxa (cm)' }
 async function shrink(file, max, q) {
   const b = await createImageBitmap(file), k = Math.min(1, max / Math.max(b.width, b.height))
   const c = document.createElement('canvas'); c.width = Math.round(b.width * k); c.height = Math.round(b.height * k)
@@ -192,7 +193,7 @@ function Body() {
     setPh((await db.photos.toArray()).sort((a, b) => a.date < b.date ? 1 : -1).map(p => ({ ...p, url: URL.createObjectURL(p.thumb) })))
   }
   useEffect(() => { load() }, [])
-  const num = k => f[k] == null || f[k] === '' ? null : +String(f[k]).replace(',', '.')
+  const num = k => dec(f[k])
   const add = async () => {
     const e = { date: f.date || todayStr(), ...Object.fromEntries(Object.keys(MET).map(k => [k, num(k)])) }
     if (Object.keys(MET).every(k => e[k] == null)) return
@@ -208,7 +209,7 @@ function Body() {
   return <div class="list">
     <div class="card"><h3>Novo registro</h3>
       <input type="date" value={f.date} onInput={e => setF({ ...f, date: e.target.value })} />
-      <div class="g2">{Object.entries(MET).map(([k, l]) => <input type="number" inputmode="decimal" placeholder={l} value={f[k] ?? ''} onInput={e => setF({ ...f, [k]: e.target.value })} />)}</div>
+      <div class="g2">{Object.entries(MET).map(([k, l]) => <input type="text" inputmode="decimal" placeholder={l} value={f[k] ?? ''} onInput={e => setF({ ...f, [k]: e.target.value })} />)}</div>
       <button class="btn pri" onClick={add}>{t('save')}</button></div>
     <div class="chips">{Object.keys(MET).map(k => <button class={m === k ? 'on' : ''} onClick={() => setM(k)}>{MET[k].split(' ')[0]}</button>)}</div>
     <Chart pts={pts} />
