@@ -168,12 +168,65 @@ function Settings({ rerender }) {
   </div>
 }
 
+
+const MET = { weight: 'Peso (kg)', cintura: 'Cintura (cm)', peito: 'Peito (cm)', braco: 'Braço (cm)', coxa: 'Coxa (cm)' }
+async function shrink(file, max, q) {
+  const b = await createImageBitmap(file), k = Math.min(1, max / Math.max(b.width, b.height))
+  const c = document.createElement('canvas'); c.width = Math.round(b.width * k); c.height = Math.round(b.height * k)
+  c.getContext('2d').drawImage(b, 0, 0, c.width, c.height)
+  return new Promise(r => c.toBlob(r, 'image/jpeg', q))
+}
+function Chart({ pts }) {
+  if (pts.length < 2) return <p class="msg">Registre ao menos 2 medidas para ver o gráfico.</p>
+  const W = 320, H = 150, P = 26; let lo = Math.min(...pts.map(p => p.y)), hi = Math.max(...pts.map(p => p.y)); if (lo === hi) { lo -= 1; hi += 1 }
+  const X = i => P + i * (W - 2 * P) / (pts.length - 1), Y = v => H - P - (v - lo) * (H - 2 * P) / (hi - lo)
+  return <svg viewBox={`0 0 ${W} ${H}`} class="chart"><polyline fill="none" stroke="#ffd400" stroke-width="2" points={pts.map((p, i) => X(i) + ',' + Y(p.y)).join(' ')} />
+    {pts.map((p, i) => <circle cx={X(i)} cy={Y(p.y)} r="3" fill="#ffd400" />)}
+    <text x="4" y="14" fill="#9b9886" font-size="11">{hi}</text><text x="4" y={H - 10} fill="#9b9886" font-size="11">{lo}</text>
+    <text x={P} y={H - 2} fill="#9b9886" font-size="11">{pts[0].x}</text><text x={W - P} y={H - 2} text-anchor="end" fill="#9b9886" font-size="11">{pts[pts.length - 1].x}</text></svg>
+}
+function Body() {
+  const [es, setEs] = useState([]), [ph, setPh] = useState([]), [f, setF] = useState({ date: todayStr() }), [m, setM] = useState('weight'), [big, setBig] = useState(null)
+  const load = async () => {
+    setEs((await db.bodyEntries.toArray()).sort((a, b) => a.date < b.date ? -1 : 1))
+    setPh((await db.photos.toArray()).sort((a, b) => a.date < b.date ? 1 : -1).map(p => ({ ...p, url: URL.createObjectURL(p.thumb) })))
+  }
+  useEffect(() => { load() }, [])
+  const num = k => f[k] == null || f[k] === '' ? null : +String(f[k]).replace(',', '.')
+  const add = async () => {
+    const e = { date: f.date || todayStr(), ...Object.fromEntries(Object.keys(MET).map(k => [k, num(k)])) }
+    if (Object.keys(MET).every(k => e[k] == null)) return
+    const old = es.find(x => x.date === e.date)
+    await db.bodyEntries.put(old ? { ...old, ...Object.fromEntries(Object.entries(e).filter(([, v]) => v != null)) } : e)
+    setF({ date: todayStr() }); load()
+  }
+  const addPhotos = async ev => {
+    for (const file of ev.target.files) await db.photos.add({ date: todayStr(), blob: await shrink(file, 1600, 0.8), thumb: await shrink(file, 320, 0.7) })
+    ev.target.value = ''; load()
+  }
+  const pts = es.filter(e => e[m] != null).map(e => ({ x: e.date.slice(5), y: e[m] }))
+  return <div class="list">
+    <div class="card"><h3>Novo registro</h3>
+      <input type="date" value={f.date} onInput={e => setF({ ...f, date: e.target.value })} />
+      <div class="g2">{Object.entries(MET).map(([k, l]) => <input type="number" inputmode="decimal" placeholder={l} value={f[k] ?? ''} onInput={e => setF({ ...f, [k]: e.target.value })} />)}</div>
+      <button class="btn pri" onClick={add}>{t('save')}</button></div>
+    <div class="chips">{Object.keys(MET).map(k => <button class={m === k ? 'on' : ''} onClick={() => setM(k)}>{MET[k].split(' ')[0]}</button>)}</div>
+    <Chart pts={pts} />
+    {[...es].reverse().slice(0, 8).map(e => <div class="wk"><span>{e.date} · {Object.keys(MET).filter(k => e[k] != null).map(k => `${MET[k].split(' ')[0]} ${e[k]}`).join(' · ')}</span>
+      <button onClick={async () => { await db.bodyEntries.delete(e.id); load() }}>✕</button></div>)}
+    <label class="btn file">Adicionar fotos<input type="file" accept="image/*" multiple hidden onChange={addPhotos} /></label>
+    <div class="photos">{ph.map(p => <img src={p.url} onClick={() => setBig(p)} />)}</div>
+    {big && <div class="lb"><img src={URL.createObjectURL(big.blob)} /><div class="g2"><button class="btn" onClick={() => setBig(null)}>Fechar</button>
+      <button class="btn" onClick={async () => { if (confirm('Apagar foto?')) { await db.photos.delete(big.id); setBig(null); load() } }}>Apagar</button></div><p class="msg">{big.date}</p></div>}
+  </div>
+}
+
 export function App() {
   const [tab, setTab] = useState('today'), [, bump] = useState(0)
   return <div class="shell"><header><h1>{t(tab)}</h1></header>
     <main>{tab === 'today' && <Today key={localStorage.activePlan} />}
       {tab === 'plans' && <Plans go={setTab} />}
-      {tab === 'body' && <Empty title={t('body')} hint={t('bodyHint')} />}
+      {tab === 'body' && <Body />}
       {tab === 'settings' && <Settings rerender={() => bump(x => x + 1)} />}</main>
     <nav>{TABS.map(k => <button class={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{t(k)}</button>)}</nav></div>
 }
