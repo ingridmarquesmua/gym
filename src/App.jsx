@@ -6,6 +6,10 @@ import { readDoc, parsePages, parseReps, parseRest } from './parser'
 const TABS = ['today', 'plans', 'progress', 'body', 'settings']
 const DOW = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom']
 const dec = v => { const n = parseFloat(String(v ?? '').replace(',', '.')); return isNaN(n) ? null : n }
+const SET_SEC = 40
+const setKcal = (it, kg) => ((SET_SEC + (it?.restMax ?? it?.restMin ?? 60)) / 3600) * +(localStorage.met || 5) * kg
+const dayKcal = (items, logs, bw) => Math.round(items.reduce((a, it) => a + Array.from({ length: it.sets }).filter((_, i) => logs[it.id + '-' + i]?.done).length * setKcal(it, bw), 0))
+const lastWeight = async () => (await db.bodyEntries.toArray()).filter(e => e.weight != null).sort((a, b) => a.date < b.date ? 1 : -1)[0]?.weight
 const todayStr = () => new Date().toLocaleDateString('sv')
 const Empty = ({ title, hint }) => <div class="empty"><h2>{title}</h2><p>{hint}</p></div>
 
@@ -105,8 +109,9 @@ function Plans({ go }) {
 
 function Today() {
   const [wd, setWd] = useState(((new Date().getDay() + 6) % 7) + 1)
-  const [d, setD] = useState(null), [logs, setLogs] = useState({}), [prev, setPrev] = useState({}), [sess, setSess] = useState(null), [open, setOpen] = useState(null)
+  const [d, setD] = useState(null), [logs, setLogs] = useState({}), [prev, setPrev] = useState({}), [sess, setSess] = useState(null), [open, setOpen] = useState(null), [bw, setBw] = useState(null)
   useEffect(() => { (async () => {
+    setBw(await lastWeight())
     const plan = +localStorage.activePlan && await db.plans.get(+localStorage.activePlan)
     if (!plan) return setD({ none: true })
     const day = await db.days.where('planId').equals(plan.id).and(x => x.weekday === wd).first()
@@ -131,13 +136,14 @@ function Today() {
   if (!d) return null
   if (d.none) return <Empty title={t('today')} hint={t('noActive')} />
   return <div>{tabs}<p class="msg">{t('week')} {d.plan.weekNumber} · {d.day?.label || ''}</p>
+    {d.items.length > 0 && (bw ? <p class="stats">~<b>{dayKcal(d.items, logs, bw)}</b> kcal</p> : <p class="msg">Registre seu peso na aba Corpo para ver a estimativa de calorias.</p>)}
     {(!d.day || d.day.isRest) && <Empty title="OFF" hint="Descanso" />}
     {d.items.map(it => {
       const done = Array.from({ length: it.sets }).filter((_, i) => logs[it.id + '-' + i]?.done).length
       const isOpen = open === it.id
       return <div class={'card ex' + (done === it.sets ? ' fin' : '') + (it.groupId ? ' bi' : '')}>
         <div class="hd" onClick={() => setOpen(isOpen ? null : it.id)}>
-          <b>{it.name}</b><span>{done}/{it.sets}</span></div>
+          <b>{it.name}</b><span>{done}/{it.sets}{bw && done > 0 ? ` · ~${Math.round(done * setKcal(it, bw))} kcal` : ''}</span></div>
         <div class="msg">{it.sets}× {it.repsRaw} · {t('rest')} {it.restRaw}{it.tech1 && ` · ${it.tech1}`}{it.tech2 && ` · ${it.tech2}`}</div>
         {isOpen && Array.from({ length: it.sets }).map((_, i) => {
           const l = logs[it.id + '-' + i] || {}, pv = prev[it.id]?.[i], target = it.repScheme.perSet?.[i]
@@ -152,15 +158,17 @@ function Today() {
 }
 
 function Settings({ rerender }) {
-  const [msg, setMsg] = useState(''), [persisted, setPersisted] = useState(false), [unit, setUnit] = useState(localStorage.getItem('unit') || 'kg')
+  const [msg, setMsg] = useState(''), [persisted, setPersisted] = useState(false), [unit, setUnit] = useState(localStorage.getItem('unit') || 'kg'), [met, setMet] = useState(localStorage.getItem('met') || '5')
   useEffect(() => { navigator.storage?.persist?.().then(setPersisted) }, [])
-  const set = (k, v) => { localStorage.setItem(k, v); k === 'lang' ? rerender() : setUnit(v) }
+  const set = (k, v) => { localStorage.setItem(k, v); k === 'lang' ? rerender() : k === 'unit' ? setUnit(v) : setMet(v) }
   const doExport = async () => { const a = document.createElement('a'); a.href = URL.createObjectURL(await exportAll()); a.download = `treino-backup-${todayStr()}.json`; a.click() }
   const doImport = async e => { try { await importAll(e.target.files[0]); setMsg(t('imported')) } catch { setMsg(t('error')) } }
   const Seg = ({ k, opts, val }) => <div class="seg">{opts.map(([v, l]) => <button class={val === v ? 'on' : ''} onClick={() => set(k, v)}>{l}</button>)}</div>
   return <div class="list">
     <label>{t('language')}</label><Seg k="lang" val={getLang()} opts={[['pt', 'Português'], ['en', 'English']]} />
     <label>{t('unit')}</label><Seg k="unit" val={unit} opts={[['kg', 'kg'], ['lb', 'lb']]} />
+    <label>{t('intensity')}</label><Seg k="met" val={met} opts={[['3.5', 'Leve'], ['5', 'Moderada'], ['6', 'Intensa']]} />
+    <p class="msg">Estimativa de calorias (MET × peso × tempo). O erro pode passar de 30%; use para comparar treinos.</p>
     <label>{t('data')}</label>
     <button class="btn" onClick={doExport}>{t('export')}</button>
     <label class="btn file">{t('import')}<input type="file" accept="application/json" onChange={doImport} hidden /></label>
@@ -223,7 +231,14 @@ function Body() {
 }
 
 function Progress() {
-  const [ex, setEx] = useState([]), [q, setQ] = useState(''), [sel, setSel] = useState(null), [m, setM] = useState('maxW'), [det, setDet] = useState(null)
+  const [ex, setEx] = useState([]), [q, setQ] = useState(''), [sel, setSel] = useState(null), [m, setM] = useState('maxW'), [det, setDet] = useState(null), [cal, setCal] = useState(null)
+  useEffect(() => { (async () => {
+    const bw = await lastWeight(); if (!bw) return setCal({ nobw: true })
+    const ss = await db.sessions.toArray(), its = await db.items.toArray(), logs = (await db.setLogs.toArray()).filter(l => l.done)
+    const im = Object.fromEntries(its.map(i => [i.id, i])), sd = Object.fromEntries(ss.map(x => [x.id, x.date])); let w = 0, m = 0
+    logs.forEach(l => { const d = sd[l.sessionId]; if (!d) return; const age = (Date.now() - new Date(d)) / 864e5, k = setKcal(im[l.planItemId], bw); if (age <= 7) w += k; if (age <= 30) m += k })
+    setCal({ w: Math.round(w), m: Math.round(m) })
+  })() }, [])
   useEffect(() => { (async () => {
     const logs = (await db.setLogs.toArray()).filter(l => l.weightKg != null), by = {}
     logs.forEach(l => (by[l.exerciseId] ??= new Set()).add(l.sessionId))
@@ -251,7 +266,7 @@ function Progress() {
     </div>}
   </div>
   if (!ex.length) return <Empty title={t('progress')} hint="Registre cargas na aba Hoje para ver o histórico aqui." />
-  return <div class="list"><input placeholder="Buscar exercício" value={q} onInput={e => setQ(e.target.value)} />
+  return <div class="list">{cal && !cal.nobw && <p class="stats">~<b>{cal.w}</b> kcal na semana · <b>{cal.m}</b> kcal em 30 dias</p>}<input placeholder="Buscar exercício" value={q} onInput={e => setQ(e.target.value)} />
     {ex.filter(e => norm(e.name).includes(norm(q))).map(e => <div class="card hd" onClick={() => setSel(e)}><b>{e.name}</b><span>{e.n}×</span></div>)}</div>
 }
 
