@@ -140,6 +140,14 @@ function Today() {
       navigator.vibrate?.([200, 100, 200])
     }
   }, [left, timer])
+  const wl = !!timer && !timer.fired
+  useEffect(() => {
+    if (!wl) return
+    let lock; const get = async () => { try { lock = await navigator.wakeLock?.request('screen') } catch {} }
+    get(); const vis = () => { if (document.visibilityState === 'visible') get() }
+    document.addEventListener('visibilitychange', vis)
+    return () => { document.removeEventListener('visibilitychange', vis); lock?.release?.().catch(() => {}) }
+  }, [wl])
   const startRest = it => {
     unlock(); const r = it.restMax ?? it.restMin ?? 60
     if (!r) return setTimer(null)
@@ -195,6 +203,31 @@ function Today() {
   </div>
 }
 
+function Reminders() {
+  const [days, setDays] = useState(JSON.parse(localStorage.remDays || '[1,3,5]')), [time, setTime] = useState(localStorage.remTime || '18:00'), [al, setAl] = useState(localStorage.remAlert || '0'), [msg, setMsg] = useState('')
+  const toggle = n => { const v = days.includes(n) ? days.filter(x => x !== n) : [...days, n].sort(); setDays(v); localStorage.remDays = JSON.stringify(v) }
+  const gen = async () => {
+    if (!days.length) return setMsg('Escolha ao menos um dia.')
+    const [h, mi] = time.split(':').map(Number), p = n => String(n).padStart(2, '0'), now = new Date()
+    const stamp = now.toISOString().replace(/[-:]|\.\d{3}/g, ''), BY = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU']
+    const ev = days.map(wd => {
+      const s = new Date(now); s.setDate(now.getDate() + (wd - (((now.getDay() + 6) % 7) + 1) + 7) % 7)
+      return ['BEGIN:VEVENT', `UID:treino-${BY[wd - 1]}@treino.app`, `DTSTAMP:${stamp}`, `DTSTART:${s.getFullYear()}${p(s.getMonth() + 1)}${p(s.getDate())}T${p(h)}${p(mi)}00`,
+        'DURATION:PT1H', `RRULE:FREQ=WEEKLY;BYDAY=${BY[wd - 1]}`, 'SUMMARY:Treino', 'BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:Hora do treino', `TRIGGER:-PT${al}M`, 'END:VALARM', 'END:VEVENT'].join('\r\n')
+    })
+    const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Treino//PT', 'CALSCALE:GREGORIAN', ...ev, 'END:VCALENDAR'].join('\r\n')
+    const file = new File([ics], 'treino-lembretes.ics', { type: 'text/calendar' })
+    try { if (navigator.canShare?.({ files: [file] })) { await navigator.share({ files: [file] }); return } } catch (e) { if (e.name === 'AbortError') return }
+    const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = file.name; a.click()
+  }
+  return <div class="list"><label>Lembretes de treino (Calendário)</label>
+    <div class="chips">{DOW.map((n, i) => <button class={days.includes(i + 1) ? 'on' : ''} onClick={() => toggle(i + 1)}>{n}</button>)}</div>
+    <input type="time" value={time} onInput={e => { setTime(e.target.value); localStorage.remTime = e.target.value }} />
+    <div class="chips">{[['0', 'Na hora'], ['15', '15 min antes'], ['30', '30 min antes']].map(([v, l]) => <button class={al === v ? 'on' : ''} onClick={() => { setAl(v); localStorage.remAlert = v }}>{l}</button>)}</div>
+    <button class="btn" onClick={gen}>Gerar lembretes (.ics)</button>
+    <p class="msg">{msg || 'Ao gerar, escolha Calendário e toque em Adicionar. Se já importou antes, apague os eventos antigos "Treino" para não duplicar.'}</p></div>
+}
+
 function Settings({ rerender }) {
   const [msg, setMsg] = useState(''), [persisted, setPersisted] = useState(false), [unit, setUnit] = useState(localStorage.getItem('unit') || 'kg'), [met, setMet] = useState(localStorage.getItem('met') || '5')
   useEffect(() => { navigator.storage?.persist?.().then(setPersisted) }, [])
@@ -207,6 +240,7 @@ function Settings({ rerender }) {
     <label>{t('unit')}</label><Seg k="unit" val={unit} opts={[['kg', 'kg'], ['lb', 'lb']]} />
     <label>{t('intensity')}</label><Seg k="met" val={met} opts={[['3.5', 'Leve'], ['5', 'Moderada'], ['6', 'Intensa']]} />
     <p class="msg">Estimativa de calorias (MET × peso × tempo). O erro pode passar de 30%; use para comparar treinos.</p>
+    <Reminders />
     <label>{t('data')}</label>
     <button class="btn" onClick={doExport}>{t('export')}</button>
     <label class="btn file">{t('import')}<input type="file" accept="application/json" onChange={doImport} hidden /></label>
