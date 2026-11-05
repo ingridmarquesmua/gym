@@ -12,6 +12,9 @@ const dayKcal = (items, logs, bw) => Math.round(items.reduce((a, it) => a + Arra
 const lastWeight = async () => (await db.bodyEntries.toArray()).filter(e => e.weight != null).sort((a, b) => a.date < b.date ? 1 : -1)[0]?.weight
 const CARDIO = { esteira_caminhada: ['Esteira (caminhada)', 3.5], esteira_corrida: ['Esteira (corrida)', 9], bicicleta: ['Bicicleta', 6.8], eliptico: ['Elíptico', 5], escada: ['Escada', 8.8], remo: ['Remo', 7], corda: ['Pular corda', 11], outro: ['Outro', 5] }
 const cardioKcal = (c, kg) => (CARDIO[c.type]?.[1] ?? 5) * kg * c.minutes / 60
+let ac
+const unlock = () => { try { ac ??= new (window.AudioContext || window.webkitAudioContext)(); ac.resume() } catch {} }
+const beep = () => { try { const o = ac.createOscillator(), g = ac.createGain(); o.connect(g); g.connect(ac.destination); o.frequency.value = 880; g.gain.value = 0.25; o.start(); o.stop(ac.currentTime + 0.25) } catch {} }
 const todayStr = () => new Date().toLocaleDateString('sv')
 const Empty = ({ title, hint }) => <div class="empty"><h2>{title}</h2><p>{hint}</p></div>
 
@@ -127,6 +130,21 @@ function Today() {
     }
     setSess(s?.id || null); setLogs(lg); setPrev(pv); setD({ plan, day, items })
   })() }, [wd])
+  const [timer, setTimer] = useState(null), [now, setNow] = useState(Date.now()), [mute, setMute] = useState(localStorage.mute === '1')
+  useEffect(() => { if (!timer) return; const id = setInterval(() => setNow(Date.now()), 250); return () => clearInterval(id) }, [timer])
+  const left = timer ? Math.max(0, Math.ceil((timer.endAt - now) / 1000)) : 0
+  useEffect(() => {
+    if (timer && !timer.fired && left === 0) {
+      setTimer({ ...timer, fired: true })
+      if (!mute) { beep(); setTimeout(beep, 350); setTimeout(beep, 700) }
+      navigator.vibrate?.([200, 100, 200])
+    }
+  }, [left, timer])
+  const startRest = it => {
+    unlock(); const r = it.restMax ?? it.restMin ?? 60
+    if (!r) return setTimer(null)
+    setNow(Date.now()); setTimer({ endAt: Date.now() + r * 1000, fired: false })
+  }
   const save = async (it, i, patch) => {
     let sid = sess
     if (!sid) { sid = await db.sessions.add({ dayId: d.day.id, date: todayStr(), startedAt: Date.now() }); setSess(sid) }
@@ -164,11 +182,17 @@ function Today() {
           return <div class="set"><span>{i + 1}</span>
             <input type="text" inputmode="decimal" placeholder={pv ? `${pv.weightKg}` : 'kg'} value={l.weightKg ?? ''} onChange={e => save(it, i, { weightKg: dec(e.target.value) })} />
             <input type="number" inputmode="numeric" placeholder={target ? `${target}` : pv?.reps ? `${pv.reps}` : 'reps'} value={l.reps ?? ''} onChange={e => save(it, i, { reps: e.target.value === '' ? null : +e.target.value })} />
-            <button class={l.done ? 'on' : ''} onClick={() => save(it, i, { done: !l.done, weightKg: l.weightKg ?? pv?.weightKg ?? null, reps: l.reps ?? target ?? pv?.reps ?? null })}>✓</button></div>
+            <button class={l.done ? 'on' : ''} onClick={() => { if (!l.done) startRest(it); save(it, i, { done: !l.done, weightKg: l.weightKg ?? pv?.weightKg ?? null, reps: l.reps ?? target ?? pv?.reps ?? null }) }}>✓</button></div>
         })}
         {isOpen && prev[it.id]?.[0] && <p class="msg">{t('last')}: {Object.values(prev[it.id]).map(x => `${x.weightKg}×${x.reps ?? '-'}`).join(' · ')}</p>}
       </div>
-    })}</div>
+    })}
+    {timer && <div style={{ position: 'sticky', bottom: 0, display: 'flex', gap: 8, alignItems: 'center', padding: '10px 12px', border: '1px solid var(--accent)', background: left ? 'var(--panel)' : 'var(--accent)', color: left ? 'var(--fg)' : '#000' }}>
+      <b style={{ fontSize: 30, flex: 1 }}>{left ? `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}` : 'Próxima série!'}</b>
+      <button class="btn" style={{ padding: '8px 12px' }} onClick={() => { unlock(); const v = !mute; setMute(v); localStorage.mute = v ? '1' : '0' }}>{mute ? '🔕' : '🔔'}</button>
+      <button class="btn" style={{ padding: '8px 12px' }} onClick={() => setTimer({ ...timer, endAt: Math.max(timer.endAt, Date.now()) + 15000, fired: false })}>+15s</button>
+      <button class="btn" style={{ padding: '8px 12px' }} onClick={() => setTimer(null)}>✕</button></div>}
+  </div>
 }
 
 function Settings({ rerender }) {
