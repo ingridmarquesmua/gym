@@ -12,6 +12,7 @@ db.version(1).stores({
   photos: '++id,date',
   reminders: '++id'
 })
+db.version(2).stores({ cardio: '++id,date' })
 export const norm = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim()
 
 export async function exportAll() {

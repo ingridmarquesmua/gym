@@ -10,6 +10,8 @@ const SET_SEC = 40
 const setKcal = (it, kg) => ((SET_SEC + (it?.restMax ?? it?.restMin ?? 60)) / 3600) * +(localStorage.met || 5) * kg
 const dayKcal = (items, logs, bw) => Math.round(items.reduce((a, it) => a + Array.from({ length: it.sets }).filter((_, i) => logs[it.id + '-' + i]?.done).length * setKcal(it, bw), 0))
 const lastWeight = async () => (await db.bodyEntries.toArray()).filter(e => e.weight != null).sort((a, b) => a.date < b.date ? 1 : -1)[0]?.weight
+const CARDIO = { esteira_caminhada: ['Esteira (caminhada)', 3.5], esteira_corrida: ['Esteira (corrida)', 9], bicicleta: ['Bicicleta', 6.8], eliptico: ['Elíptico', 5], escada: ['Escada', 8.8], remo: ['Remo', 7], corda: ['Pular corda', 11], outro: ['Outro', 5] }
+const cardioKcal = (c, kg) => (CARDIO[c.type]?.[1] ?? 5) * kg * c.minutes / 60
 const todayStr = () => new Date().toLocaleDateString('sv')
 const Empty = ({ title, hint }) => <div class="empty"><h2>{title}</h2><p>{hint}</p></div>
 
@@ -109,9 +111,9 @@ function Plans({ go }) {
 
 function Today() {
   const [wd, setWd] = useState(((new Date().getDay() + 6) % 7) + 1)
-  const [d, setD] = useState(null), [logs, setLogs] = useState({}), [prev, setPrev] = useState({}), [sess, setSess] = useState(null), [open, setOpen] = useState(null), [bw, setBw] = useState(null)
+  const [d, setD] = useState(null), [logs, setLogs] = useState({}), [prev, setPrev] = useState({}), [sess, setSess] = useState(null), [open, setOpen] = useState(null), [bw, setBw] = useState(null), [cardio, setCardio] = useState([]), [cf, setCf] = useState({ type: 'esteira_caminhada', min: '' })
   useEffect(() => { (async () => {
-    setBw(await lastWeight())
+    setBw(await lastWeight()); setCardio(await db.cardio.where('date').equals(todayStr()).toArray())
     const plan = +localStorage.activePlan && await db.plans.get(+localStorage.activePlan)
     if (!plan) return setD({ none: true })
     const day = await db.days.where('planId').equals(plan.id).and(x => x.weekday === wd).first()
@@ -132,11 +134,23 @@ function Today() {
     const nl = { ...(logs[k] || { sessionId: sid, planItemId: it.id, exerciseId: it.exerciseId, setIndex: i }), ...patch, timestamp: Date.now() }
     nl.id = await db.setLogs.put(nl); setLogs({ ...logs, [k]: nl })
   }
+  const addCardio = async () => {
+    const mins = dec(cf.min); if (!mins || mins <= 0) return
+    await db.cardio.add({ date: todayStr(), type: cf.type, minutes: mins }); setCf({ ...cf, min: '' })
+    setCardio(await db.cardio.where('date').equals(todayStr()).toArray())
+  }
   const tabs = <div class="chips">{DOW.map((n, i) => <button class={wd === i + 1 ? 'on' : ''} onClick={() => setWd(i + 1)}>{n}</button>)}</div>
   if (!d) return null
   if (d.none) return <Empty title={t('today')} hint={t('noActive')} />
   return <div>{tabs}<p class="msg">{t('week')} {d.plan.weekNumber} · {d.day?.label || ''}</p>
-    {d.items.length > 0 && (bw ? <p class="stats">~<b>{dayKcal(d.items, logs, bw)}</b> kcal</p> : <p class="msg">Registre seu peso na aba Corpo para ver a estimativa de calorias.</p>)}
+    {bw ? (d.items.length > 0 || cardio.length > 0) && <p class="stats">Treino ~<b>{dayKcal(d.items, logs, bw)}</b> · Cardio ~<b>{Math.round(cardio.reduce((a, c) => a + cardioKcal(c, bw), 0))}</b> · Total ~<b>{dayKcal(d.items, logs, bw) + Math.round(cardio.reduce((a, c) => a + cardioKcal(c, bw), 0))}</b> kcal</p>
+      : <p class="msg">Registre seu peso na aba Corpo para ver a estimativa de calorias.</p>}
+    <details class="card"><summary>Cardio (opcional){cardio.length ? ` · ${cardio.reduce((a, c) => a + c.minutes, 0)} min` : ''}</summary>
+      <div class="chips" style={{ flexWrap: 'wrap', margin: '10px 0' }}>{Object.entries(CARDIO).map(([k, [l]]) => <button style={{ flex: '1 0 30%' }} class={cf.type === k ? 'on' : ''} onClick={() => setCf({ ...cf, type: k })}>{l}</button>)}</div>
+      <div class="g2"><input type="text" inputmode="decimal" placeholder="Minutos" value={cf.min} onInput={e => setCf({ ...cf, min: e.target.value })} /><button class="btn pri" onClick={addCardio}>Adicionar</button></div>
+      {cardio.map(c => <div class="wk"><span>{CARDIO[c.type]?.[0]} · {c.minutes} min{bw ? ` · ~${Math.round(cardioKcal(c, bw))} kcal` : ''}</span>
+        <button onClick={async () => { await db.cardio.delete(c.id); setCardio(cardio.filter(x => x.id !== c.id)) }}>✕</button></div>)}
+    </details>
     {(!d.day || d.day.isRest) && <Empty title="OFF" hint="Descanso" />}
     {d.items.map(it => {
       const done = Array.from({ length: it.sets }).filter((_, i) => logs[it.id + '-' + i]?.done).length
@@ -237,6 +251,7 @@ function Progress() {
     const ss = await db.sessions.toArray(), its = await db.items.toArray(), logs = (await db.setLogs.toArray()).filter(l => l.done)
     const im = Object.fromEntries(its.map(i => [i.id, i])), sd = Object.fromEntries(ss.map(x => [x.id, x.date])); let w = 0, m = 0
     logs.forEach(l => { const d = sd[l.sessionId]; if (!d) return; const age = (Date.now() - new Date(d)) / 864e5, k = setKcal(im[l.planItemId], bw); if (age <= 7) w += k; if (age <= 30) m += k })
+    ;(await db.cardio.toArray()).forEach(c => { const age = (Date.now() - new Date(c.date)) / 864e5, k = cardioKcal(c, bw); if (age <= 7) w += k; if (age <= 30) m += k })
     setCal({ w: Math.round(w), m: Math.round(m) })
   })() }, [])
   useEffect(() => { (async () => {
@@ -266,7 +281,7 @@ function Progress() {
     </div>}
   </div>
   if (!ex.length) return <Empty title={t('progress')} hint="Registre cargas na aba Hoje para ver o histórico aqui." />
-  return <div class="list">{cal && !cal.nobw && <p class="stats">~<b>{cal.w}</b> kcal na semana · <b>{cal.m}</b> kcal em 30 dias</p>}<input placeholder="Buscar exercício" value={q} onInput={e => setQ(e.target.value)} />
+  return <div class="list">{cal && !cal.nobw && <p class="stats">~<b>{cal.w}</b> kcal na semana · <b>{cal.m}</b> kcal em 30 dias (treino + cardio)</p>}<input placeholder="Buscar exercício" value={q} onInput={e => setQ(e.target.value)} />
     {ex.filter(e => norm(e.name).includes(norm(q))).map(e => <div class="card hd" onClick={() => setSel(e)}><b>{e.name}</b><span>{e.n}×</span></div>)}</div>
 }
 
