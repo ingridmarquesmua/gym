@@ -3,7 +3,7 @@ import { db, norm, exportAll, importAll } from './db'
 import { t, getLang } from './i18n'
 import { readDoc, parsePages, parseReps, parseRest } from './parser'
 
-const TABS = ['today', 'plans', 'body', 'settings']
+const TABS = ['today', 'plans', 'progress', 'body', 'settings']
 const DOW = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom']
 const dec = v => { const n = parseFloat(String(v ?? '').replace(',', '.')); return isNaN(n) ? null : n }
 const todayStr = () => new Date().toLocaleDateString('sv')
@@ -222,11 +222,45 @@ function Body() {
   </div>
 }
 
+function Progress() {
+  const [ex, setEx] = useState([]), [q, setQ] = useState(''), [sel, setSel] = useState(null), [m, setM] = useState('maxW'), [det, setDet] = useState(null)
+  useEffect(() => { (async () => {
+    const logs = (await db.setLogs.toArray()).filter(l => l.weightKg != null), by = {}
+    logs.forEach(l => (by[l.exerciseId] ??= new Set()).add(l.sessionId))
+    setEx((await db.exercises.toArray()).filter(e => by[e.id]).map(e => ({ ...e, n: by[e.id].size })).sort((a, b) => a.name.localeCompare(b.name)))
+  })() }, [])
+  useEffect(() => { if (!sel) return; (async () => {
+    const logs = (await db.setLogs.where('exerciseId').equals(sel.id).toArray()).filter(l => l.weightKg != null)
+    const ss = await db.sessions.toArray(), ds = await db.days.toArray(), ps = await db.plans.toArray(), by = {}
+    logs.forEach(l => (by[l.sessionId] ??= []).push(l))
+    setDet(Object.entries(by).map(([sid, ls]) => {
+      const s = ss.find(x => x.id == sid); ls.sort((a, b) => a.setIndex - b.setIndex)
+      return { date: s?.date || '', wk: ps.find(p => p.id === ds.find(d => d.id === s?.dayId)?.planId)?.weekNumber,
+        sets: ls.map(l => `${l.weightKg}×${l.reps ?? '-'}`).join(' · '), maxW: Math.max(...ls.map(l => l.weightKg)),
+        vol: Math.round(ls.reduce((a, l) => a + l.weightKg * (l.reps || 0), 0)),
+        rm: Math.round(Math.max(...ls.map(l => l.weightKg * (1 + (l.reps || 0) / 30))) * 10) / 10 }
+    }).sort((a, b) => a.date < b.date ? -1 : 1))
+  })() }, [sel])
+  if (sel) return <div class="list">
+    <button class="btn" onClick={() => { setSel(null); setDet(null) }}>← {sel.name}</button>
+    {det && <div>
+      <p class="stats">Recorde <b>{Math.max(...det.map(r => r.maxW))}</b> kg · 1RM est. <b>{Math.max(...det.map(r => r.rm))}</b> · Volume <b>{Math.max(...det.map(r => r.vol))}</b></p>
+      <div class="chips">{[['maxW', 'Carga máx'], ['rm', '1RM est.'], ['vol', 'Volume']].map(([k, l]) => <button class={m === k ? 'on' : ''} onClick={() => setM(k)}>{l}</button>)}</div>
+      <Chart pts={det.map(r => ({ x: r.date.slice(5), y: r[m] }))} />
+      {[...det].reverse().map(r => <div class="card"><b>{r.date}{r.wk ? ` · ${t('week')} ${r.wk}` : ''}</b><div class="msg">{r.sets}</div></div>)}
+    </div>}
+  </div>
+  if (!ex.length) return <Empty title={t('progress')} hint="Registre cargas na aba Hoje para ver o histórico aqui." />
+  return <div class="list"><input placeholder="Buscar exercício" value={q} onInput={e => setQ(e.target.value)} />
+    {ex.filter(e => norm(e.name).includes(norm(q))).map(e => <div class="card hd" onClick={() => setSel(e)}><b>{e.name}</b><span>{e.n}×</span></div>)}</div>
+}
+
 export function App() {
   const [tab, setTab] = useState('today'), [, bump] = useState(0)
   return <div class="shell"><header><h1>{t(tab)}</h1></header>
     <main>{tab === 'today' && <Today key={localStorage.activePlan} />}
       {tab === 'plans' && <Plans go={setTab} />}
+      {tab === 'progress' && <Progress />}
       {tab === 'body' && <Body />}
       {tab === 'settings' && <Settings rerender={() => bump(x => x + 1)} />}</main>
     <nav>{TABS.map(k => <button class={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{t(k)}</button>)}</nav></div>
