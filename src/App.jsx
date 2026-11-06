@@ -101,9 +101,48 @@ function Review({ parsed, setParsed, name, setName, onSave, onCancel }) {
   </div>
 }
 
+function EditPlan({ planId, onClose }) {
+  const [days, setDays] = useState(null)
+  useEffect(() => { (async () => {
+    const ds = (await db.days.where('planId').equals(planId).toArray()).sort((a, b) => a.weekday - b.weekday)
+    setDays(await Promise.all(ds.map(async d => ({ ...d, items: await db.items.where('dayId').equals(d.id).sortBy('order') }))))
+  })() }, [])
+  const mut = fn => { const c = structuredClone(days); fn(c); setDays(c) }
+  const save = async () => {
+    for (const d of days) {
+      const keep = d.items.filter(i => i.id).map(i => i.id)
+      for (const id of await db.items.where('dayId').equals(d.id).primaryKeys()) if (!keep.includes(id)) await db.items.delete(id)
+      let order = 0
+      for (const it of d.items) {
+        if (!it.name.trim()) { if (it.id) await db.items.delete(it.id); continue }
+        const n = norm(it.name), ex = await db.exercises.where('nameNormalized').equals(n).first()
+        const exerciseId = ex?.id ?? await db.exercises.add({ name: it.name.trim(), nameNormalized: n }), r = parseRest(it.restRaw || '')
+        const row = { ...it, dayId: d.id, order: order++, exerciseId, name: it.name.trim(), sets: parseInt(it.sets) || 1, repScheme: parseReps(it.repsRaw || ''), restMin: r.min, restMax: r.max }
+        row.id ? await db.items.put(row) : await db.items.add(row)
+      }
+    }
+    onClose()
+  }
+  if (!days) return null
+  const F = (di, ii, k, cls) => <input class={cls} value={days[di].items[ii][k] ?? ''} onInput={e => mut(c => { c[di].items[ii][k] = e.target.value })} />
+  return <div class="list">
+    <p class="msg">Para substituir um exercício, troque o nome. O histórico de cargas fica ligado ao nome do exercício, então um nome novo começa um histórico novo.</p>
+    {days.map((d, di) => <div class="card"><h3>{d.label}{d.isRest ? ' (OFF)' : ''}</h3>
+      {d.items.map((it, ii) => <div class="row">{F(di, ii, 'name', 'w')}{F(di, ii, 'sets', 's')}{F(di, ii, 'repsRaw', 'm')}{F(di, ii, 'restRaw', 'm')}{F(di, ii, 'tech1', 'w')}{F(di, ii, 'tech2', 'w')}
+        <div class="wk" style={{ gridColumn: '1/5' }}>
+          <button onClick={() => mut(c => { const a = c[di].items; if (ii > 0) [a[ii - 1], a[ii]] = [a[ii], a[ii - 1]] })}>↑</button>
+          <button onClick={() => mut(c => { const a = c[di].items; if (ii < a.length - 1) [a[ii + 1], a[ii]] = [a[ii], a[ii + 1]] })}>↓</button>
+          <button onClick={() => mut(c => { c[di].items.splice(ii, 1) })}>✕</button></div></div>)}
+      {!d.isRest && <button class="btn" onClick={() => mut(c => { c[di].items.push({ name: '', sets: 3, repsRaw: '', restRaw: '', tech1: '', tech2: '' }) })}>+ Exercício</button>}
+    </div>)}
+    <button class="btn pri" onClick={save}>{t('save')}</button>
+    <button class="btn" onClick={onClose}>{t('cancel')}</button>
+  </div>
+}
+
 function Plans({ go }) {
   const [progs, setProgs] = useState([]), [parsed, setParsed] = useState(null), [name, setName] = useState('')
-  const [busy, setBusy] = useState(''), [paste, setPaste] = useState(null), [err, setErr] = useState(''), [, bump] = useState(0)
+  const [busy, setBusy] = useState(''), [paste, setPaste] = useState(null), [edit, setEdit] = useState(null), [err, setErr] = useState(''), [, bump] = useState(0)
   const load = async () => {
     const ps = await db.programs.toArray(), pl = await db.plans.toArray()
     setProgs(ps.map(p => ({ ...p, plans: pl.filter(x => x.programId === p.id).sort((a, b) => a.weekNumber - b.weekNumber) })))
@@ -122,6 +161,7 @@ function Plans({ go }) {
   }
   if (parsed) return <Review {...{ parsed, setParsed, name, setName }} onCancel={() => setParsed(null)}
     onSave={async () => { await savePlans(name, parsed); setParsed(null); load() }} />
+  if (edit) return <EditPlan planId={edit} onClose={() => { setEdit(null); load() }} />
   if (paste != null) return <div class="list">
     <p class="msg">Uma linha por exercício: Nome | séries | reps | descanso | técnica | técnica 2. Use "## Dia" para o dia, "# Semana N" para a semana e "+" no início da linha para ligar em Bi-Set com a linha anterior.</p>
     <textarea rows="14" value={paste} onInput={e => setPaste(e.target.value)} style={{ width: '100%', background: 'var(--bg)', color: 'var(--fg)', border: '1px solid var(--line)', padding: 10, font: 'inherit' }} />
@@ -136,6 +176,7 @@ function Plans({ go }) {
     {progs.map(p => <div class="card"><h3>{p.name}</h3>
       {p.plans.map(pl => <div class="wk"><span>{t('week')} {pl.weekNumber}</span>
         <button class={active === pl.id ? 'on' : ''} onClick={() => { localStorage.activePlan = pl.id; bump(x => x + 1); go('today') }}>{active === pl.id ? t('active') : t('use')}</button>
+        <button onClick={() => setEdit(pl.id)}>✎</button>
         <button onClick={async () => { if (confirm(t('del') + '?')) { await deletePlan(pl.id); load() } }}>✕</button></div>)}</div>)}
   </div>
 }
