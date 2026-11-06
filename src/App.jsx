@@ -105,11 +105,12 @@ function EditPlan({ planId, onClose }) {
   const [days, setDays] = useState(null)
   useEffect(() => { (async () => {
     const ds = (await db.days.where('planId').equals(planId).toArray()).sort((a, b) => a.weekday - b.weekday)
-    setDays(await Promise.all(ds.map(async d => ({ ...d, items: await db.items.where('dayId').equals(d.id).sortBy('order') }))))
+    setDays(await Promise.all(ds.map(async d => ({ ...d, weekdays: d.weekdays || [d.weekday], items: await db.items.where('dayId').equals(d.id).sortBy('order') }))))
   })() }, [])
   const mut = fn => { const c = structuredClone(days); fn(c); setDays(c) }
   const save = async () => {
     for (const d of days) {
+      await db.days.update(d.id, { label: d.label, weekdays: d.weekdays, weekday: d.weekdays[0] ?? d.weekday })
       const keep = d.items.filter(i => i.id).map(i => i.id)
       for (const id of await db.items.where('dayId').equals(d.id).primaryKeys()) if (!keep.includes(id)) await db.items.delete(id)
       let order = 0
@@ -126,8 +127,9 @@ function EditPlan({ planId, onClose }) {
   if (!days) return null
   const F = (di, ii, k, cls) => <input class={cls} value={days[di].items[ii][k] ?? ''} onInput={e => mut(c => { c[di].items[ii][k] = e.target.value })} />
   return <div class="list">
-    <p class="msg">Para substituir um exercício, troque o nome. O histórico de cargas fica ligado ao nome do exercício, então um nome novo começa um histórico novo.</p>
-    {days.map((d, di) => <div class="card"><h3>{d.label}{d.isRest ? ' (OFF)' : ''}</h3>
+    <p class="msg">Em cada treino, escolha os dias da semana em que você o faz (pode marcar mais de um) e renomeie se quiser. Para substituir um exercício, troque o nome. O histórico de cargas fica ligado ao nome do exercício, então um nome novo começa um histórico novo.</p>
+    {days.map((d, di) => <div class="card"><input value={d.label} onInput={e => mut(c => { c[di].label = e.target.value })} style={{ fontWeight: 700, color: 'var(--accent)', marginBottom: 8 }} />
+      <div class="chips">{DOW.map((n, i) => <button class={d.weekdays.includes(i + 1) ? 'on' : ''} onClick={() => mut(c => { const w = c[di].weekdays; c[di].weekdays = w.includes(i + 1) ? w.filter(x => x !== i + 1) : [...w, i + 1].sort() })}>{n}</button>)}</div>
       {d.items.map((it, ii) => <div class="row">{F(di, ii, 'name', 'w')}{F(di, ii, 'sets', 's')}{F(di, ii, 'repsRaw', 'm')}{F(di, ii, 'restRaw', 'm')}{F(di, ii, 'tech1', 'w')}{F(di, ii, 'tech2', 'w')}
         <div class="wk" style={{ gridColumn: '1/5' }}>
           <button onClick={() => mut(c => { const a = c[di].items; if (ii > 0) [a[ii - 1], a[ii]] = [a[ii], a[ii - 1]] })}>↑</button>
@@ -188,7 +190,7 @@ function Today() {
     setBw(await lastWeight()); setCardio(await db.cardio.where('date').equals(todayStr()).toArray())
     const plan = +localStorage.activePlan && await db.plans.get(+localStorage.activePlan)
     if (!plan) return setD({ none: true })
-    const day = await db.days.where('planId').equals(plan.id).and(x => x.weekday === wd).first()
+    const day = await db.days.where('planId').equals(plan.id).and(x => (x.weekdays || [x.weekday]).includes(wd)).first()
     const items = day && !day.isRest ? await db.items.where('dayId').equals(day.id).sortBy('order') : []
     const s = day && await db.sessions.where('dayId').equals(day.id).and(x => x.date === todayStr()).first()
     const lg = {}; if (s) (await db.setLogs.where('sessionId').equals(s.id).toArray()).forEach(l => lg[l.planItemId + '-' + l.setIndex] = l)
