@@ -91,3 +91,24 @@ export function parsePages(pages, opts = {}) {
   days.forEach(d => d.items.forEach(i => { i.t1 = fix(i.t1); i.t2 = fix(i.t2); i.name = fix(i.name); i.reps = i.reps.replace(/\s+/g, ' ').trim() }))
   return { week, days }
 }
+
+export function parseText(text) {
+  const days = []; let week = 1, day = null, group = 0
+  for (const raw of text.split('\n')) {
+    const l = raw.trim(); if (!l) continue
+    const wk = l.match(/^#\s*semana\s*(\d+)/i); if (wk) { week = +wk[1]; continue }
+    const wd = l.match(/^##\s*(.+)$/)
+    if (wd) {
+      const label = wd[1].trim(), key = nz(label).replace(/-?feira.*/, '').replace(/\s*(off|descanso).*/, '').trim()
+      day = { weekday: WD[key] || days.length + 1, label, isRest: /off|descanso/i.test(label), items: [] }; days.push(day); continue
+    }
+    if (!day) continue
+    const joined = l.startsWith('+'), f = l.replace(/^\+/, '').split('|').map(s => s.trim())
+    if (!f[0]) continue
+    const it = { name: f[0], sets: +f[1] || 3, reps: f[2] || '', rest: f[3] || '', t1: f[4] || '', t2: f[5] || '', group: 0 }
+    const prev = day.items[day.items.length - 1]
+    if (joined && prev) { prev.group ||= ++group; it.group = prev.group }
+    day.items.push(it)
+  }
+  return { week, days }
+}

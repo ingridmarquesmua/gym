@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'preact/hooks'
 import { db, norm, exportAll, importAll } from './db'
 import { t, getLang } from './i18n'
-import { readDoc, parsePages, parseReps, parseRest } from './parser'
+import { readDoc, parsePages, parseReps, parseRest, parseText } from './parser'
 
 const TABS = ['today', 'plans', 'progress', 'body', 'settings']
 const DOW = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom']
@@ -103,7 +103,7 @@ function Review({ parsed, setParsed, name, setName, onSave, onCancel }) {
 
 function Plans({ go }) {
   const [progs, setProgs] = useState([]), [parsed, setParsed] = useState(null), [name, setName] = useState('')
-  const [busy, setBusy] = useState(''), [err, setErr] = useState(''), [, bump] = useState(0)
+  const [busy, setBusy] = useState(''), [paste, setPaste] = useState(null), [err, setErr] = useState(''), [, bump] = useState(0)
   const load = async () => {
     const ps = await db.programs.toArray(), pl = await db.plans.toArray()
     setProgs(ps.map(p => ({ ...p, plans: pl.filter(x => x.programId === p.id).sort((a, b) => a.weekNumber - b.weekNumber) })))
@@ -122,8 +122,14 @@ function Plans({ go }) {
   }
   if (parsed) return <Review {...{ parsed, setParsed, name, setName }} onCancel={() => setParsed(null)}
     onSave={async () => { await savePlans(name, parsed); setParsed(null); load() }} />
+  if (paste != null) return <div class="list">
+    <p class="msg">Uma linha por exercício: Nome | séries | reps | descanso | técnica | técnica 2. Use "## Dia" para o dia, "# Semana N" para a semana e "+" no início da linha para ligar em Bi-Set com a linha anterior.</p>
+    <textarea rows="14" value={paste} onInput={e => setPaste(e.target.value)} style={{ width: '100%', background: 'var(--bg)', color: 'var(--fg)', border: '1px solid var(--line)', padding: 10, font: 'inherit' }} />
+    <button class="btn pri" onClick={() => { const r = parseText(paste); setName('Programa'); setParsed([{ file: 'texto', week: r.week, days: r.days }]); setPaste(null) }}>Ler texto</button>
+    <button class="btn" onClick={() => setPaste(null)}>{t('cancel')}</button></div>
   const active = +localStorage.activePlan
   return <div class="list">
+    <button class="btn" onClick={() => setPaste('')}>Colar texto</button>
     <label class="btn pri file">{busy || t('importPdf')}<input type="file" accept="application/pdf,image/*" multiple hidden onChange={pick} /></label>
     {err && <p class="msg">{err}</p>}
     {!progs.length && <Empty title={t('noPlans')} hint={t('noPlansHint')} />}
