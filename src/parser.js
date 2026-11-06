@@ -27,7 +27,7 @@ export function parseRest(raw) {
 function toRows(items) {
   const rows = []
   for (const it of [...items].sort((a, b) => b.y - a.y)) {
-    const r = rows.find(r => Math.abs(r.y - it.y) < 3)
+    const r = rows.find(r => Math.abs(r.y - it.y) < Math.max(3, 0.6 * (it.h || 0)))
     r ? r.items.push(it) : rows.push({ y: it.y, items: [it] })
   }
   rows.forEach(r => r.items.sort((a, b) => a.x - b.x))
@@ -37,23 +37,25 @@ function toRows(items) {
 function headerCols(row) {
   const cols = []
   for (const it of row.items) {
-    const k = nz(it.s), c = it.x + it.w / 2
-    const key = k.startsWith('exercicio') ? 'name' : k.startsWith('serie') ? 'sets' : k === 'reps' ? 'reps'
-      : k === 'desc' ? 'rest' : k.startsWith('tecnica') ? (k.endsWith('2') ? 't2' : 't1') : null
+    const k = nz(it.s).replace(/[^a-z0-9]/g, ''), c = it.x + it.w / 2
+    const key = k.includes('exerc') ? 'name' : k.includes('serie') ? 'sets' : k.startsWith('rep') ? 'reps'
+      : k.startsWith('desc') ? 'rest' : k.includes('tecni') ? (k.endsWith('2') ? 't2' : 't1') : null
     if (key) cols.push({ key, c, x: it.x })
   }
-  return cols.some(c => c.key === 'name') && cols.some(c => c.key === 'reps') ? cols : null
+  return cols.some(c => c.key === 'name') && cols.length >= 3 ? cols : null
 }
 
-export function parsePages(pages) {
+const JUNK = /^[|\[\]()=_:;~—–\-.,'\u201c\u201d\u2018\u2019]+|[|\[\]()=_:;~—–]+$/g
+export function parsePages(pages, opts = {}) {
+  pages = pages.map(pg => pg.map(i => ({ ...i, s: i.s.replace(JUNK, '').trim() })).filter(i => /[A-Za-z0-9\u00c0-\u00ff]/.test(i.s)))
   let week = null, cols = null, day = null, last = null, lastY = 0, group = 0, pend = 0
   const days = []
   for (const items of pages) {
     for (const row of toRows(items)) {
       const text = row.items.map(i => i.s).join(' ')
       const wk = text.match(/semana\s*(\d+)/i); if (wk && week == null) week = +wk[1]
-      const wd = row.items.length <= 2 && WD[nz(text).replace(/-?feira.*/, '')]
-      if (wd) { day = { weekday: wd, label: text, isRest: false, items: [] }; days.push(day); last = null; continue }
+      const wdIt = row.items.length <= 4 && row.items.find(i => WD[nz(i.s).replace(/-?feira.*/, '')]), wd = wdIt && WD[nz(wdIt.s).replace(/-?feira.*/, '')]
+      if (wd) { day = { weekday: wd, label: wdIt.s, isRest: false, items: [] }; days.push(day); last = null; continue }
       const h = headerCols(row); if (h) { cols = h; continue }
       if (!cols || !day) continue
       if (/off\s*-?\s*descanso/i.test(text)) { day.isRest = true; continue }
@@ -61,6 +63,7 @@ export function parsePages(pages) {
       for (const it of row.items) {
         if (NOISE.test(it.s)) continue
         if (/^bi-?set$/i.test(it.s)) { bi = true; continue }
+        if (opts.ocr && (it.x < cols[0].x - 60 || it.x > cols[cols.length - 1].c + 250)) continue
         const c = it.x + it.w / 2
         const idx = it.x < (cols[0].c + (cols[1]?.c ?? 0)) / 2 ? 0
           : cols.reduce((b, k, i) => Math.abs(k.c - c) < Math.abs(cols[b].c - c) ? i : b, 0)
@@ -68,8 +71,9 @@ export function parsePages(pages) {
       }
       if (bi && !Object.keys(cells).length && last) { last.group = last.group || ++group; pend = last.group; continue }
       if (cells.name && /^bi-?set\s+/i.test(cells.name)) { bi = true; cells.name = cells.name.replace(/^bi-?set\s+/i, '') }
-      if (/^\d+$/.test(cells.sets || '') && cells.name) {
-        const it = { name: cells.name, sets: +cells.sets, reps: cells.reps || '', rest: cells.rest || '', t1: cells.t1 || '', t2: cells.t2 || '', group: 0 }
+      const okSets = /^\d{1,2}$/.test(cells.sets || '')
+      if (cells.name && (okSets || (opts.ocr && /\d/.test(cells.reps || '')))) {
+        const it = { name: cells.name, sets: okSets ? +cells.sets : 3, reps: cells.reps || '', rest: cells.rest || '', t1: cells.t1 || '', t2: cells.t2 || '', group: 0 }
         if (bi) { group = ++group; pend = group; it.group = group } else if (pend) { it.group = pend; pend = 0 }
         day.items.push(it); last = it; lastY = row.y
       } else if (last && lastY - row.y < 26 && !cells.sets) {
@@ -78,6 +82,11 @@ export function parsePages(pages) {
       }
     }
   }
+  if (opts.ocr) days.forEach(d => d.items.forEach(i => {
+    const m = i.reps.replace(/\s/g, '').match(/^(\d{1,2})[A4O08]{1,2}(\d{1,2})$/i)
+    if (m && +m[1] < +m[2] && +m[2] <= 30) i.reps = `${m[1]} A ${m[2]}`
+    i.rest = i.rest.replace(/(\d)\s*seg/i, '$1 seg')
+  }))
   const fix = s => s.replace(/ù/g, 'ú').replace(/Descrescente/g, 'Decrescente').replace(/\s+/g, ' ').trim()
   days.forEach(d => d.items.forEach(i => { i.t1 = fix(i.t1); i.t2 = fix(i.t2); i.name = fix(i.name); i.reps = i.reps.replace(/\s+/g, ' ').trim() }))
   return { week, days }

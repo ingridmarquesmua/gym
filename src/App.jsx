@@ -38,14 +38,14 @@ async function readPdf(file, onStatus) {
       pages.push(await ocrCanvas(c, 2))
     }
   }
-  return finish(file, parsePages(pages), ocr)
+  return finish(file, parsePages(pages, { ocr }), ocr)
 }
 async function readImage(file, onStatus) {
   onStatus('OCR...')
   const b = await createImageBitmap(file), k = Math.min(1, 2400 / Math.max(b.width, b.height)), c = document.createElement('canvas')
   c.width = Math.round(b.width * k); c.height = Math.round(b.height * k); c.getContext('2d').drawImage(b, 0, 0, c.width, c.height)
   const { ocrCanvas } = await import('./ocr')
-  return finish(file, parsePages([await ocrCanvas(c, Math.max(c.width, c.height) / 900)]), true)
+  return finish(file, parsePages([await ocrCanvas(c, Math.max(c.width, c.height) / 900)], { ocr: true }), true)
 }
 
 async function deletePlan(id) {
