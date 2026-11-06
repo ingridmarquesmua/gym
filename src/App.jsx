@@ -18,14 +18,34 @@ const beep = () => { try { const o = ac.createOscillator(), g = ac.createGain();
 const todayStr = () => new Date().toLocaleDateString('sv')
 const Empty = ({ title, hint }) => <div class="empty"><h2>{title}</h2><p>{hint}</p></div>
 
-async function readPdf(file) {
+function finish(file, r, ocr) {
+  const m = file.name.match(/semana[\s_-]*(\d+)/i)
+  return { file: file.name, week: r.week ?? (m ? +m[1] : 1), days: r.days, ocr }
+}
+async function readPdf(file, onStatus) {
   const pdfjs = await import('pdfjs-dist')
   pdfjs.GlobalWorkerOptions.workerSrc = (await import('pdfjs-dist/build/pdf.worker.min.js?url')).default
-  const pages = await readDoc(await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise)
-  if (pages.every(p => p.length < 5)) throw new Error('noText')
-  const r = parsePages(pages)
-  const m = file.name.match(/semana[\s_-]*(\d+)/i)
-  return { file: file.name, week: r.week ?? (m ? +m[1] : 1), days: r.days }
+  const doc = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise
+  let pages = await readDoc(doc), ocr = false
+  if (pages.every(p => p.length < 5)) {
+    ocr = true; pages = []
+    const { ocrCanvas } = await import('./ocr')
+    for (let i = 1; i <= doc.numPages; i++) {
+      onStatus(`OCR ${i}/${doc.numPages}...`)
+      const pg = await doc.getPage(i), vp = pg.getViewport({ scale: 2 }), c = document.createElement('canvas')
+      c.width = vp.width; c.height = vp.height
+      await pg.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise
+      pages.push(await ocrCanvas(c, 2))
+    }
+  }
+  return finish(file, parsePages(pages), ocr)
+}
+async function readImage(file, onStatus) {
+  onStatus('OCR...')
+  const b = await createImageBitmap(file), k = Math.min(1, 2400 / Math.max(b.width, b.height)), c = document.createElement('canvas')
+  c.width = Math.round(b.width * k); c.height = Math.round(b.height * k); c.getContext('2d').drawImage(b, 0, 0, c.width, c.height)
+  const { ocrCanvas } = await import('./ocr')
+  return finish(file, parsePages([await ocrCanvas(c, Math.max(c.width, c.height) / 900)]), true)
 }
 
 async function deletePlan(id) {
@@ -62,8 +82,10 @@ function Review({ parsed, setParsed, name, setName, onSave, onCancel }) {
   const upd = (pi, di, ii, k, v) => { const c = structuredClone(parsed); c[pi].days[di].items[ii][k] = v; setParsed(c) }
   const rm = (pi, di, ii) => { const c = structuredClone(parsed); c[pi].days[di].items.splice(ii, 1); setParsed(c) }
   return <div class="list">
+    {parsed.some(p => p.ocr) && <p class="msg">Leitura por OCR: confira nomes, séries e reps com atenção.</p>}
     <label>{t('programName')}</label><input value={name} onInput={e => setName(e.target.value)} />
     {parsed.map((p, pi) => <details class="card"><summary>{t('week')} {p.week} · {p.days.reduce((a, d) => a + d.items.length, 0)} ex.</summary>
+      <div class="wk"><span>{t('week')}</span><input value={p.week} style={{ width: 70 }} onChange={e => { const c = structuredClone(parsed); c[pi].week = +e.target.value || 1; setParsed(c) }} /></div>
       {p.days.map((d, di) => <div><h3>{d.label}{d.isRest ? ' (OFF)' : ''}</h3>
         {d.items.map((it, ii) => <div class="row">
           <input class="w" value={it.name} onInput={e => upd(pi, di, ii, 'name', e.target.value)} />
@@ -81,28 +103,28 @@ function Review({ parsed, setParsed, name, setName, onSave, onCancel }) {
 
 function Plans({ go }) {
   const [progs, setProgs] = useState([]), [parsed, setParsed] = useState(null), [name, setName] = useState('')
-  const [busy, setBusy] = useState(false), [err, setErr] = useState(''), [, bump] = useState(0)
+  const [busy, setBusy] = useState(''), [err, setErr] = useState(''), [, bump] = useState(0)
   const load = async () => {
     const ps = await db.programs.toArray(), pl = await db.plans.toArray()
     setProgs(ps.map(p => ({ ...p, plans: pl.filter(x => x.programId === p.id).sort((a, b) => a.weekNumber - b.weekNumber) })))
   }
   useEffect(() => { load() }, [])
   const pick = async e => {
-    setBusy(true); setErr('')
+    setBusy(t('reading')); setErr('')
     try {
       const out = []
-      for (const f of e.target.files) out.push(await readPdf(f))
+      for (const f of e.target.files) out.push(f.type.startsWith('image/') ? await readImage(f, setBusy) : await readPdf(f, setBusy))
       out.sort((a, b) => a.week - b.week)
       setName(e.target.files[0].name.replace(/\.pdf$/i, '').replace(/[\s_-]*semana[\s_-]*\d+/i, '').replace(/_/g, ' ').trim() || 'Programa')
       setParsed(out)
-    } catch (x) { setErr(x.message === 'noText' ? t('noText') : String(x.message)) }
-    setBusy(false); e.target.value = ''
+    } catch (x) { setErr('Falha na leitura: ' + String(x.message || x) + ' (o OCR precisa de internet na primeira vez)') }
+    setBusy(''); e.target.value = ''
   }
   if (parsed) return <Review {...{ parsed, setParsed, name, setName }} onCancel={() => setParsed(null)}
     onSave={async () => { await savePlans(name, parsed); setParsed(null); load() }} />
   const active = +localStorage.activePlan
   return <div class="list">
-    <label class="btn pri file">{busy ? t('reading') : t('importPdf')}<input type="file" accept="application/pdf" multiple hidden onChange={pick} /></label>
+    <label class="btn pri file">{busy || t('importPdf')}<input type="file" accept="application/pdf,image/*" multiple hidden onChange={pick} /></label>
     {err && <p class="msg">{err}</p>}
     {!progs.length && <Empty title={t('noPlans')} hint={t('noPlansHint')} />}
     {progs.map(p => <div class="card"><h3>{p.name}</h3>

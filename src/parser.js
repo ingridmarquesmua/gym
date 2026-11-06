@@ -14,7 +14,7 @@ export async function readDoc(doc) {
 export function parseReps(raw) {
   const r = raw.replace(/\s+/g, ' ').trim()
   if (/^\d+(\s*\/\s*\d+)+$/.test(r)) return { type: 'pyramid', perSet: r.split('/').map(n => +n) }
-  const m = r.match(/^(\d+) a (\d+)$/i); if (m) return { type: 'range', min: +m[1], max: +m[2] }
+  const m = r.match(/^(\d+)\s*a\s*(\d+)$/i); if (m) return { type: 'range', min: +m[1], max: +m[2] }
   if (/^\d+$/.test(r)) return { type: 'fixed', n: +r }
   if (/^falha$/i.test(r)) return { type: 'failure' }
   return { type: 'text' }
