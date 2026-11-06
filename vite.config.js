@@ -10,6 +10,7 @@ export default defineConfig({
       display: 'standalone', background_color: '#0e0e0c', theme_color: '#0e0e0c',
       icons: [{ src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
               { src: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' }] },
-    workbox: { maximumFileSizeToCacheInBytes: 5000000, globPatterns: ['**/*.{js,css,html,png,svg,woff2}'] }
+    workbox: { maximumFileSizeToCacheInBytes: 5000000, globIgnores: ['ocr/**'],
+      runtimeCaching: [{ urlPattern: ({ url }) => url.pathname.includes('/ocr/'), handler: 'CacheFirst', options: { cacheName: 'ocr', cacheableResponse: { statuses: [0, 200] } } }], globPatterns: ['**/*.{js,css,html,png,svg,woff2}'] }
   })]
 })
