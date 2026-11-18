@@ -219,6 +219,20 @@ function Today() {
     document.addEventListener('visibilitychange', vis)
     return () => { document.removeEventListener('visibilitychange', vis); lock?.release?.().catch(() => {}) }
   }, [wl])
+  const [drag, setDrag] = useState(null)
+  const idxAt = y => { const els = [...document.querySelectorAll('[data-ex]')]; for (let i = 0; i < els.length; i++) { const r = els[i].getBoundingClientRect(); if (y < r.top + r.height / 2) return i } return els.length }
+  const startDrag = (e, i) => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); setOpen(null); setDrag({ from: i, to: i }) }
+  const moveDrag = e => {
+    if (!drag) return; const m = document.querySelector('main')
+    if (e.clientY < 130) m.scrollBy(0, -14); else if (e.clientY > innerHeight - 150) m.scrollBy(0, 14)
+    setDrag({ ...drag, to: idxAt(e.clientY) })
+  }
+  const endDrag = async () => {
+    if (!drag) return; const { from, to } = drag; setDrag(null)
+    const dest = to > from ? to - 1 : to; if (dest === from) return
+    const a = [...d.items]; const [m] = a.splice(from, 1); a.splice(dest, 0, m); setD({ ...d, items: a })
+    for (let i = 0; i < a.length; i++) await db.items.update(a[i].id, { order: i })
+  }
   const startRest = it => {
     unlock(); const r = it.restMax ?? it.restMin ?? 60
     if (!r) return setTimer(null)
@@ -249,12 +263,15 @@ function Today() {
         <button onClick={async () => { await db.cardio.delete(c.id); setCardio(cardio.filter(x => x.id !== c.id)) }}>✕</button></div>)}
     </details>
     {(!d.day || d.day.isRest) && <Empty title="OFF" hint="Descanso" />}
-    {d.items.map(it => {
+    {d.items.map((it, idx) => {
       const done = Array.from({ length: it.sets }).filter((_, i) => logs[it.id + '-' + i]?.done).length
       const isOpen = open === it.id
-      return <div class={'card ex' + (done === it.sets ? ' fin' : '') + (it.groupId ? ' bi' : '')}>
+      const gap = drag && drag.to === idx && drag.to !== drag.from && drag.to !== drag.from + 1
+      return <div data-ex class={'card ex' + (done === it.sets ? ' fin' : '') + (it.groupId ? ' bi' : '')} style={gap ? { boxShadow: 'inset 0 4px var(--accent)' } : drag?.from === idx ? { opacity: 0.4 } : undefined}>
         <div class="hd" onClick={() => setOpen(isOpen ? null : it.id)}>
-          <b>{it.name}</b><span>{done}/{it.sets}{bw && done > 0 ? ` · ~${Math.round(done * setKcal(it, bw))} kcal` : ''}</span></div>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span onClick={e => e.stopPropagation()} onPointerDown={e => startDrag(e, idx)} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={() => setDrag(null)}
+              style={{ touchAction: 'none', color: 'var(--dim)', padding: '4px 8px', fontSize: 22 }}>☰</span><b>{it.name}</b></span><span>{done}/{it.sets}{bw && done > 0 ? ` · ~${Math.round(done * setKcal(it, bw))} kcal` : ''}</span></div>
         <div class="msg">{it.sets}× {it.repsRaw} · {t('rest')} {it.restRaw}{it.tech1 && ` · ${it.tech1}`}{it.tech2 && ` · ${it.tech2}`}</div>
         {isOpen && Array.from({ length: it.sets }).map((_, i) => {
           const l = logs[it.id + '-' + i] || {}, pv = prev[it.id]?.[i], target = it.repScheme.perSet?.[i]
@@ -266,6 +283,7 @@ function Today() {
         {isOpen && prev[it.id]?.[0] && <p class="msg">{t('last')}: {Object.values(prev[it.id]).map(x => `${x.weightKg}×${x.reps ?? '-'}`).join(' · ')}</p>}
       </div>
     })}
+    {drag && drag.to === d.items.length && drag.from !== d.items.length - 1 && <div style={{ height: 4, background: 'var(--accent)' }} />}
     {timer && <div style={{ position: 'sticky', bottom: 0, display: 'flex', gap: 8, alignItems: 'center', padding: '10px 12px', border: '1px solid var(--accent)', background: left ? 'var(--panel)' : 'var(--accent)', color: left ? 'var(--fg)' : '#000' }}>
       <b style={{ fontSize: 30, flex: 1 }}>{left ? `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}` : 'Próxima série!'}</b>
       <button class="btn" style={{ padding: '8px 12px' }} onClick={() => { unlock(); const v = !mute; setMute(v); localStorage.mute = v ? '1' : '0' }}>{mute ? '🔕' : '🔔'}</button>
